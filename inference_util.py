@@ -97,134 +97,99 @@ def check_data_format(job_input):
         "motion_lora"   : motion_lora,
     }
 
+import os
+import torch
+
+from diffusers import AnimateDiffPipeline, MotionAdapter, StableDiffusionPipeline
+
 
 class AnimateDiff:
-    def __init__(self, version="v2"):
-        self.version = version
-        assert self.version in ["v1", "v2"], "version must be either v1 or v2"
-        pretrained_model_path = os.path.join(os.path.dirname(__file__), "models/StableDiffusion/stable-diffusion-v1-5")
-        self.motion_module    = os.path.join(os.path.dirname(__file__), "models/Motion_Module/mm_sd_v15_{}-fp16.safetensors".format(self.version))
-        self.inference_config = OmegaConf.load(os.path.join(os.path.dirname(__file__), "inference_{}.yaml".format(self.version)))
-        self.model_dir        = os.path.join(os.path.dirname(__file__), "models/DreamBooth_LoRA")
+    def __init__(
+        self,
+        base_model="runwayml/stable-diffusion-v1-5",
+        motion_adapter_repo="guoyww/animatediff-motion-adapter-v1-5-2",
+        device="cuda"
+    ):
+        self.base_model = base_model
+        self.motion_adapter_repo = motion_adapter_repo
+        self.device = device
 
-        # can not be changed
-        self.video_length = 16
-        self.use_fp16     = True
-        self.dtype        = torch.float16 if self.use_fp16 else torch.float32
-        self.device       = "cuda"  # only support gpu
+        self.pipe = None
+        self._load_pipeline()
 
-        self.pipeline = init_pipeline(pretrained_model_path, self.inference_config, self.device, self.dtype)
+    # -----------------------------
+    # PIPELINE LOADER
+    # -----------------------------
+    def _load_pipeline(self):
 
-        # pre-defined default params, can be changed
-        self.steps          = 25
-        self.guidance_scale = 7.5
-        self.person_prompts = ["boy", "girl", "man", "woman", "person", "eye", "face"]
+        print("[AnimateDiff] Loading base model...")
 
-    def _reload_motion_module(self):
-        # somehow the motion module needs to be reloaded every time if the motion lora was applied, otherwise the result could be wrong
-        # reloading the motion module only takes 0.2s, so I think it's fine to reload it every time instead of checking if last time the motion lora was applied
-        self.pipeline = reload_motion_module(self.pipeline, self.motion_module, self.device)
+        # 1. Load motion adapter (SAFE, HF-based)
+        try:
+            adapter = MotionAdapter.from_pretrained(
+                self.motion_adapter_repo
+            )
+        except Exception as e:
+            raise RuntimeError(
+                f"[AnimateDiff] Failed to load motion adapter: {e}"
+            )
 
-    def _get_model_params(self, prompt, width, height, n_prompt, base_model, base_loras, motion_lora):
-        prompt = prompt[:-1] if prompt[-1] == "." else prompt
-        if base_model is None:
-            # when base_model is not specified, use the default model
-            # if the prompt contains person-related keywords, use the person model, otherwise use the default model
-            isPerson = False
-            for keyword in self.person_prompts:
-                if keyword in prompt:
-                    isPerson = True
-                    break
+        # 2. Build pipeline
+        try:
+            self.pipe = AnimateDiffPipeline.from_pretrained(
+                self.base_model,
+                motion_adapter=adapter,
+                torch_dtype=torch.float16
+            )
+            self.pipe.to(self.device)
 
-            # load default params
-            model_config = self.inference_config.Person if isPerson else self.inference_config.Default
-            base_model   = model_config.base_model
-            base_loras   = model_config.base_loras
-            motion_lora  = model_config.motion_lora if self.version == "v2" else None
-            prompt += ", "
-            prompt += model_config.prompt
-        else:
-            # load default params
-            model_config = self.inference_config.Default
+        except Exception as e:
+            raise RuntimeError(
+                f"[AnimateDiff] Pipeline load failed: {e}"
+            )
 
-        # update with user-specified params
-        n_prompt = model_config.n_prompt if n_prompt is None else n_prompt
-        width    = model_config.width if width is None else width
-        height   = model_config.height if height is None else height
+        print("[AnimateDiff] Ready.")
 
-        return prompt, width, height, n_prompt, base_model, base_loras, motion_lora
-
-    def _update_model(self, base_model, base_loras, motion_lora):
-        # update model
-        if base_model and base_model != "":
-            self._reload_motion_module()
-            self.pipeline = load_base_model(self.pipeline, self.model_dir, base_model, self.device, self.dtype)
-            # make sure the model is on the right device and dtype
-            self.pipeline.to(self.device, self.dtype)
-
-            # apply lora
-            if base_loras:
-                if len(base_loras) != 0:
-                    for lora in base_loras:
-                        if len(base_loras[lora]) != 2:
-                            raise ValueError('base_loras must be {"lora_name": [filename, scale], "lora_name2": [filename2, scale2] ...}')
-                    self.pipeline = apply_lora(self.pipeline, self.model_dir, base_loras, device=self.device, dtype=self.dtype)
-
-            # apply motion lora
-            if motion_lora:
-                if self.version == "v1":
-                    raise ValueError("motion_lora is not supported in v1")
-                if len(motion_lora) == 2:
-                    self.pipeline = apply_motion_lora(self.pipeline, self.model_dir, motion_lora, device=self.device, dtype=self.dtype)
-                else:
-                    raise ValueError("motion_lora must be [filename, scale]")
-        else:
-            raise ValueError("base model must be specified")
-
+    # -----------------------------
+    # INFERENCE
+    # -----------------------------
     def inference(
         self,
         prompt,
-        steps          = None,
-        width          = None,
-        height         = None,
-        n_prompt       = None,
-        guidance_scale = None,
-        seed           = None,
-        base_model     = None,
-        base_loras     = None,
-        motion_lora    = None,
+        steps=25,
+        width=768,
+        height=432,
+        n_prompt="low quality, blurry",
+        guidance_scale=7.5,
+        seed=42,
+        num_frames=16
     ):
-        # only prompt is required
-        # optional params for inference: steps, guidance_scale, width, height, seed, n_prompt
-        # optional params for model: base_model, base_loras, motion_lora
 
-        prompt, width, height, n_prompt, base_model, base_loras, motion_lora = self._get_model_params(
-            prompt, width, height, n_prompt, base_model, base_loras, motion_lora
+        if self.pipe is None:
+            raise RuntimeError("Pipeline not initialized")
+
+        generator = torch.Generator(device=self.device).manual_seed(seed)
+
+        result = self.pipe(
+            prompt=prompt,
+            negative_prompt=n_prompt,
+            num_inference_steps=steps,
+            guidance_scale=guidance_scale,
+            width=width,
+            height=height,
+            num_frames=num_frames,
+            generator=generator
         )
-        self._update_model(base_model, base_loras, motion_lora)
 
-        # inference
-        seed = seed if seed is not None else torch.randint(0, 1000000000, (1,)).item()
-        torch.manual_seed(seed)
+        # save video
+        import imageio
+        import uuid
 
-        print(f"current seed: {torch.initial_seed()}")
-        print(f"sampling {prompt} ...")
-        print(f"negative prompt: {n_prompt}")
-        steps = self.steps if steps is None else steps
-        with torch.no_grad():
-            sample = self.pipeline(
-                prompt              = prompt,
-                negative_prompt     = n_prompt,
-                num_inference_steps = steps,
-                guidance_scale      = self.guidance_scale if guidance_scale is None else guidance_scale,
-                width               = width,
-                height              = height,
-                video_length        = self.video_length,
-            ).videos
+        path = f"/tmp/{uuid.uuid4()}.mp4"
 
-            save_path = save_video(sample, seed=seed)
-        return save_path
+        imageio.mimsave(path, result.frames[0], fps=6)
 
+        return path
 
 if __name__ == "__main__":
     # example seeds:
