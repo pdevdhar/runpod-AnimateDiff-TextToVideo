@@ -10,10 +10,12 @@ einops==0.6.1
 transformers>=4.38.0
 accelerate>=0.26.0
 
-xformers>=0.0.25
+# FIX: Force xformers to stick to the PyTorch 2.2.1 compatible version
+xformers==0.0.25.post1
 
 diffusers==0.27.2
 
 huggingface-hub>=0.20.0
 
 gdown
+
