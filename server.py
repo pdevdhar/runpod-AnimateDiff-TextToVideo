@@ -4,7 +4,10 @@ import io
 import runpod
 import torch
 from PIL import Image
-from diffusers import AnimateDiffPipeline, DDIMScheduler, MotionAdapter, SparseControlNetModel
+# FIX: Import SparseControlNetModel and the specific SparseControlNet pipeline directly
+from diffusers import DDIMScheduler, MotionAdapter
+from diffusers.models.controlnets.controlnet_sparsectrl import SparseControlNetModel
+from diffusers.pipelines.animatediff.pipeline_animatediff_sparsectrl import AnimateDiffSparseControlNetPipeline
 from diffusers.utils import export_to_video
 
 # Preload models outside the handler loop for warm worker execution speed
@@ -28,12 +31,22 @@ sparsectrl_model = SparseControlNetModel.from_pretrained(
 )
 
 # 3. Instantiate the master pipeline with SparseCtrl support
+# 3. FIX: Use the specific SparseControlNet pipeline constructor class
+pipeline = AnimateDiffSparseControlNetPipeline.from_pretrained(
+    f"{volume_models_path}/StableDiffusion", 
+    motion_adapter=motion_adapter,
+    controlnet=sparsectrl_model,
+    torch_dtype=torch.float16
+).to(device)
+
+"""
 pipeline = AnimateDiffPipeline.from_pretrained(
     f"{volume_models_path}/StableDiffusion", 
     motion_adapter=motion_adapter,
     controlnet=sparsectrl_model,
     torch_dtype=torch.float16
 ).to(device)
+"""
 
 # 4. Use DDIMScheduler for stable generation frame sequencing
 pipeline.scheduler = DDIMScheduler.from_config(pipeline.scheduler.config)
