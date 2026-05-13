@@ -28,8 +28,6 @@ def handle_timeout(signum, frame):
 def text2video(job):
     # set timeout to 5 minutes, should be enough for most cases
     try:
-        signal.signal(signal.SIGALRM, handle_timeout)
-        signal.alarm(timeout_s)
         job_input = job["input"]
         job_input = check_data_format(job_input)
         print("prompt is '{}'".format(job_input["prompt"]))

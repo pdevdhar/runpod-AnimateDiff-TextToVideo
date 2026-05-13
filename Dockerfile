@@ -1,31 +1,15 @@
-# Include base image
-FROM docker.io/pytorch/pytorch:2.0.1-cuda11.7-cudnn8-runtime
+FROM runpod/pytorch:2.2.1-py3.10-cuda12.1.1-devel-ubuntu22.04
 
-# Define working directory
-WORKDIR /workspace/
+# Install essential video/image system dependencies missing from base images
+RUN apt-get update && apt-get install -y ffmpeg libgl1-mesa-glx git && rm -rf /var/lib/apt/lists/*
 
-# Set timezone
-ENV TZ=Asia/Tokyo
-RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
+WORKDIR /
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
 
-# Install dependencies
-RUN apt-get update && apt-get -y install libgl1 libglib2.0-0 vim
-RUN apt-get autoremove -y && apt-get clean -y
+COPY . .
 
-# Add pretrained model
-ADD animatediff ./animatediff
-ADD models ./models
+# Create the symlink to redirect local model searches to the persistent volume
+RUN ln -s /runpod-volume/models /models
 
-# Add necessary files
-ADD inference_v1.yaml ./
-ADD inference_v2.yaml ./
-ADD inference_util.py ./
-ADD server.py ./
-
-# pip install
-ADD requirements.txt ./
-RUN pip install -r requirements.txt
-
-# Run server
-CMD [ "python", "-u", "./server.py" ]
-# ADD ./test_input.json ./
+CMD [ "python", "-u", "/server.py" ]
