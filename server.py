@@ -1,51 +1,111 @@
 import os
-
-# set CUDA_MODULE_LOADING=LAZY to speed up the serverless function
-os.environ["CUDA_MODULE_LOADING"] = "LAZY"
-# set SAFETENSORS_FAST_GPU=1 to speed up the serverless function
-os.environ["SAFETENSORS_FAST_GPU"] = "1"
-import runpod
 import base64
-import signal
+import io
+import runpod
+import torch
+from PIL import Image
+from diffusers import AnimateDiffPipeline, DDIMScheduler, MotionAdapter, SparseControlNetModel
+from diffusers.utils import export_to_video
 
-from inference_util import AnimateDiff, check_data_format
+# Preload models outside the handler loop for warm worker execution speed
+device = "cuda" if torch.cuda.is_available() else "cpu"
+volume_models_path = "/runpod-volume/models"
 
-animatediff = AnimateDiff()
-timeout_s = 60 * 5
+print("Initializing AnimateDiff + SparseCtrl Pipeline...")
 
+# 1. Load the core AnimateDiff Motion Module from your volume
+motion_adapter = MotionAdapter.from_pretrained(
+    f"{volume_models_path}/Motion_Module", 
+    torch_dtype=torch.float16
+)
 
-def encode_data(data_path):
-    with open(data_path, "rb") as f:
-        data = f.read()
-    return base64.b64encode(data).decode("utf-8")
+# 2. Load the newly downloaded SparseCtrl RGB condition model for Image-to-Video
+sparsectrl_model = SparseControlNetModel.from_pretrained(
+    f"{volume_models_path}/Motion_Module",
+    subfolder="", 
+    file_name="v3_sd15_sparsectrl_rgb.safetensors",
+    torch_dtype=torch.float16
+)
 
+# 3. Instantiate the master pipeline with SparseCtrl support
+pipeline = AnimateDiffPipeline.from_pretrained(
+    f"{volume_models_path}/StableDiffusion", 
+    motion_adapter=motion_adapter,
+    controlnet=sparsectrl_model,
+    torch_dtype=torch.float16
+).to(device)
 
-def handle_timeout(signum, frame):
-    # raise an error when timeout, so that the serverless function will be terminated to avoid extra cost
-    raise TimeoutError("Request Timeout! Please check the log for more details.")
+# 4. Use DDIMScheduler for stable generation frame sequencing
+pipeline.scheduler = DDIMScheduler.from_config(pipeline.scheduler.config)
+pipeline.enable_vae_slicing()
 
+print("Pipeline initialization complete. Waiting for jobs...")
 
-def text2video(job):
-    # set timeout to 5 minutes, should be enough for most cases
+def decode_base64_image(base64_string):
+    """Decodes an incoming base64 string from your Flask app into a PIL Image"""
+    if "," in base64_string:
+        base64_string = base64_string.split(",")[1]
+    image_data = base64.b64decode(base64_string)
+    return Image.open(io.BytesIO(image_data)).convert("RGB")
+
+def image_to_video_handler(job):
     try:
-        job_input = job["input"]
-        job_input = check_data_format(job_input)
-        print("prompt is '{}'".format(job_input["prompt"]))
-        save_path = animatediff.inference(
-            prompt         = job_input["prompt"],
-            steps          = job_input["steps"],
-            width          = job_input["width"],
-            height         = job_input["height"],
-            n_prompt       = job_input["n_prompt"],
-            guidance_scale = job_input["guidance_scale"],
-            seed           = job_input["seed"],
-        )
-        video_data = encode_data(save_path)
-        return {"filename": os.path.basename(save_path), "data": video_data}
+        job_input = job.get("input", {})
+        
+        # Pull prompt settings safely
+        prompt = job_input.get("prompt", "cinematic motion, high quality")
+        n_prompt = job_input.get("n_prompt", "blurry, low quality, distorted")
+        steps = int(job_input.get("steps", 20))
+        guidance_scale = float(job_input.get("guidance_scale", 7.5))
+        width = int(job_input.get("width", 512))
+        height = int(job_input.get("height", 512))
+        
+        # Extract the optional base64 image field
+        base64_image = job_input.get("image", None)
+        
+        if base64_image:
+            print("Processing Image-to-Video request via SparseCtrl...")
+            init_image = decode_base64_image(base64_image)
+            init_image = init_image.resize((width, height))
+            
+            # Locks input image to frame 0 and animates the rest
+            output = pipeline(
+                prompt=prompt,
+                negative_prompt=n_prompt,
+                num_inference_steps=steps,
+                guidance_scale=guidance_scale,
+                width=width,
+                height=height,
+                image=init_image, 
+                num_frames=16
+            )
+        else:
+            print("No image provided. Falling back to standard Text-to-Video...")
+            output = pipeline(
+                prompt=prompt,
+                negative_prompt=n_prompt,
+                num_inference_steps=steps,
+                guidance_scale=guidance_scale,
+                width=width,
+                height=height,
+                num_frames=16
+            )
+            
+        # Compile frames array into a web-compatible H.264 MP4 container
+        frames = output.frames
+        out_path = "/tmp/output_video.mp4"
+        export_to_video(frames, out_path, fps=8)
+        
+        # Stream the MP4 binary out as a clean base64 string
+        with open(out_path, "rb") as video_file:
+            encoded_string = base64.b64encode(video_file.read()).decode("utf-8")
+            
+        return {"status": "success", "video_data": encoded_string}
+        
     except Exception as e:
-        return {"error": "Something went wrong, error message: {}".format(e)}
-    finally:
-        signal.alarm(0)
+        print(f"CRITICAL HANDLER ERROR: {str(e)}")
+        return {"status": "error", "message": str(e)}
 
+# Boot the RunPod serverless listener loop
+runpod.serverless.start({"handler": image_to_video_handler})
 
-runpod.serverless.start({"handler": text2video})
