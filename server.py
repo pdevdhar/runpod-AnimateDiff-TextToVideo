@@ -6,7 +6,7 @@ import torch
 from PIL import Image
 # FIX: Import SparseControlNetModel and the specific SparseControlNet pipeline directly
 from diffusers import DDIMScheduler, MotionAdapter
-from diffusers.models.controlnets.controlnet_sparsectrl import SparseControlNetModel
+from diffusers.models.controlnet_sparsectrl import SparseControlNetModel
 from diffusers.pipelines.animatediff.pipeline_animatediff_sparsectrl import AnimateDiffSparseControlNetPipeline
 from diffusers.utils import export_to_video
 
