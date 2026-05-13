@@ -5,9 +5,12 @@ import runpod
 import torch
 from PIL import Image
 # FIX: Import SparseControlNetModel and the specific SparseControlNet pipeline directly
-from diffusers import DDIMScheduler, MotionAdapter
-from diffusers.models.controlnet_sparsectrl import SparseControlNetModel
-from diffusers.pipelines.animatediff.pipeline_animatediff_sparsectrl import AnimateDiffSparseControlNetPipeline
+from diffusers import (
+    AnimateDiffSparseControlNetPipeline,
+    DDIMScheduler,
+    MotionAdapter,
+    SparseControlNetModel,
+)
 from diffusers.utils import export_to_video
 
 # Preload models outside the handler loop for warm worker execution speed
