@@ -39,9 +39,6 @@ def text2video(job):
             n_prompt       = job_input["n_prompt"],
             guidance_scale = job_input["guidance_scale"],
             seed           = job_input["seed"],
-            base_model     = job_input["base_model"],
-            base_loras     = job_input["base_loras"],
-            motion_lora    = job_input["motion_lora"],
         )
         video_data = encode_data(save_path)
         return {"filename": os.path.basename(save_path), "data": video_data}
