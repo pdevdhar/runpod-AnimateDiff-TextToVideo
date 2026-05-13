@@ -7,14 +7,11 @@ omegaconf==2.3.0
 safetensors>=0.4.0
 einops==0.6.1
 
-# Upgraded to align with the SparseCtrl release cycle
 transformers==4.44.2
 accelerate>=0.26.0
 
-# Critical Fix: Lock xformers and diffusers to matching 0.30 environments
-xformers==0.0.28
 diffusers==0.30.3
-
 huggingface-hub==0.25.2
 
 gdown
+

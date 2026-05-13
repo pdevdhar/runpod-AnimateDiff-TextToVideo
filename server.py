@@ -54,6 +54,10 @@ pipeline = AnimateDiffPipeline.from_pretrained(
 # 4. Use DDIMScheduler for stable generation frame sequencing
 pipeline.scheduler = DDIMScheduler.from_config(pipeline.scheduler.config)
 pipeline.enable_vae_slicing()
+# --- INSERT NEW OPTIMIZATION LINES HERE ---
+# Enable PyTorch's native memory-efficient attention (skips the need for xformers)
+pipeline.enable_attention_slicing()
+# ------------------------------------------
 
 print("Pipeline initialization complete. Waiting for jobs...")
 
