@@ -23,7 +23,7 @@ motion_adapter = MotionAdapter.from_pretrained(
 sparsectrl_model = SparseControlNetModel.from_pretrained(
     f"{volume_models_path}/Motion_Module",
     subfolder="", 
-    file_name="v3_sd15_sparsectrl_rgb.safetensors",
+    file_name="v3_sd15_sparsectrl_rgb.ckpt",
     torch_dtype=torch.float16
 )
 
