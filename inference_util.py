@@ -226,8 +226,5 @@ if __name__ == "__main__":
         n_prompt       = test_input["n_prompt"],
         guidance_scale = test_input["guidance_scale"],
         seed           = test_input["seed"],
-        base_model     = test_input["base_model"],
-        base_loras     = test_input["base_loras"],
-        motion_lora    = test_input["motion_lora"],
     )
     print("Result of custom config is saved to: {}\n".format(save_path))
