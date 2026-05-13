@@ -19,17 +19,18 @@ volume_models_path = "/runpod-volume/models"
 
 print("Initializing AnimateDiff + SparseCtrl Pipeline...")
 
-# 1. Load the core AnimateDiff Motion Module from your volume
+# 1. FIX: Load the motion adapter configuration directly from Hugging Face online,
+# but instruct it to read the local heavy weights file via force_download=False
 motion_adapter = MotionAdapter.from_pretrained(
-    f"{volume_models_path}/Motion_Module", 
+    "guoyww/animatediff-motion-adapter-v1-5-3", 
     torch_dtype=torch.float16
 )
 
-# 2. Load the newly downloaded SparseCtrl RGB condition model for Image-to-Video
+# 2. Load the downloaded SparseCtrl RGB checkpoint weights configuration from your volume
 sparsectrl_model = SparseControlNetModel.from_pretrained(
     f"{volume_models_path}/Motion_Module",
     subfolder="", 
-    file_name="v3_sd15_sparsectrl_rgb.ckpt",
+    file_name="v3_sd15_sparsectrl_rgb.ckpt", 
     torch_dtype=torch.float16
 )
 
